@@ -9,4 +9,4 @@ fi
 
 nvcc main.cu -L "$NVCC_LIBRARY_PATH" -lcudart -o gpuFFT.exe
 
-./gpuFFT.exe
+./gpuFFT.exe test_input.dat .
