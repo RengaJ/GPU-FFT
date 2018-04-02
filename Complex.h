@@ -1,6 +1,16 @@
 #ifndef GPU_FFT_COMPLEX_H
 #define GPU_FFT_COMPLEX_H
 
+// Denote if a function is CUDA callable
+//
+// Source found at:
+// https://stackoverflow.com/questions/6978643/cuda-and-classes
+#ifdef __CUDACC__
+#define CUDA_CALLABLE __host__ __device__
+#else
+#define CUDA_CALLABLE
+#endif
+
 namespace gpuFFT
 {
   class Complex
@@ -8,28 +18,43 @@ namespace gpuFFT
     public:
     
       /// @brief Default constructor for a Complex number
-      Complex();
+      CUDA_CALLABLE Complex()
+      {
+        real = 0.0f;
+        imag = 0.0f;
+      }
       
       /// @brief Full constructor for a Complex number
       ///
       /// @param [in] _real The real part of the complex number
       /// @param [in] _imag The imaginary part of the complex number
-      Complex(float _real, float _imag);
+      CUDA_CALLABLE Complex(float _real, float _imag)
+      {
+        real = _real;
+        imag = _imag;
+      }
       
-      ~Complex();
+      /// @brief Destructor for Complex number
+      CUDA_CALLABLE virtual ~Complex() {}
       
       /// @brief Obtain the complex-conjugate of the
       ///        current Complex number. Does not affect
       ///        the current Complex number.
       ///
       /// @return The complex-conjugate of the current Complex
-      Complex conj();
+      CUDA_CALLABLE Complex conj()
+      {
+        return Complex(real, -imag);
+      }
      
       /// @brief Take the complex-conjugate of the current Complex
       ///        number. This DOES affect the current Complex number.
-      void conjugate();
+      CUDA_CALLABLE void conjugate()
+      {
+        imag = -imag;
+      }
       
-      Complex& operator=(const Complex& other)
+      CUDA_CALLABLE Complex& operator=(const Complex& other)
       {
         real = other.real;
         imag = other.imag;
@@ -42,7 +67,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The resulting complex number
-      Complex operator+(const Complex& other)
+      CUDA_CALLABLE Complex operator+(const Complex& other)
       {
         return Complex(real + other.real, imag + other.imag);
       }
@@ -52,7 +77,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The resulting complex number
-      Complex operator-(const Complex& other)
+      CUDA_CALLABLE Complex operator-(const Complex& other)
       {
         return Complex(real - other.real, imag - other.imag);
       }
@@ -62,7 +87,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The resulting complex number
-      Complex operator*(const Complex& other)
+      CUDA_CALLABLE Complex operator*(const Complex& other)
       {
         // Complex multiplation:
         // (a + bi)(c + di) = ac + adi + bci - bd = (ac - bd) + (ad + bc)i
@@ -75,7 +100,7 @@ namespace gpuFFT
       /// @param [in] scalar The scaling factor
       ///
       /// @return The scaled Complex number
-      Complex operator*(const float scalar)
+      CUDA_CALLABLE Complex operator*(const float scalar)
       {
         return Complex(real * scalar, imag * scalar);
       }
@@ -85,7 +110,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The resulting complex number
-      Complex operator/(const Complex& other)
+      CUDA_CALLABLE Complex operator/(const Complex& other)
       {
         // Complex division:
         // (a + bi)/(c + di) = ((ac + bd)/(c^2 + d^2)) + ((bc - ad)/(c^2 + d^2))i
@@ -101,7 +126,7 @@ namespace gpuFFT
       /// @param [in] scalar The scaling factor
       ///
       /// @return The resulting complex number
-      Complex operator/(const float other)
+      CUDA_CALLABLE Complex operator/(const float other)
       {
         return Complex(real / other, imag / other);
       }
@@ -112,7 +137,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The newly updated complex number
-      Complex& operator+=(const Complex& other)
+      CUDA_CALLABLE Complex& operator+=(const Complex& other)
       {
         real += other.real;
         imag += other.imag;
@@ -126,7 +151,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The newly updated complex number
-      Complex& operator-=(const Complex& other)
+      CUDA_CALLABLE Complex& operator-=(const Complex& other)
       {
         real -= other.real;
         imag -= other.imag;
@@ -140,7 +165,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The newly updated complex number
-      Complex& operator*=(const Complex& other)
+      CUDA_CALLABLE Complex& operator*=(const Complex& other)
       {
         // Complex multiplation:
         // (a + bi)(c + di) = ac + adi + bci - bd = (ac - bd) + (ad + bc)i
@@ -158,7 +183,7 @@ namespace gpuFFT
       /// @param [in] scalar The scaling factor
       ///
       /// @return The newly updated complex number
-      Complex& operator*=(const float scalar)
+      CUDA_CALLABLE Complex& operator*=(const float scalar)
       {
         real *= scalar;
         imag *= scalar;
@@ -171,7 +196,7 @@ namespace gpuFFT
       /// @param [in] other The other complex number
       ///
       /// @return The newly updated complex number
-      Complex& operator/=(const Complex& other)
+      CUDA_CALLABLE Complex& operator/=(const Complex& other)
       {
         // Complex division:
         // (a + bi)/(c + di) = ((ac + bd)/(c^2 + d^2)) + ((bc - ad)/(c^2 + d^2))i
@@ -192,7 +217,7 @@ namespace gpuFFT
       /// @param [in] scalar The scaling factor
       ///
       /// @return The newly updated complex number
-      Complex& operator/=(const float other)
+      CUDA_CALLABLE Complex& operator/=(const float other)
       {
         real /= other;
         imag /= other;
