@@ -4,6 +4,15 @@
 #include <fstream>
 #include <iostream>
 
+/// ---------------   DEVICE FUNCTIONS   --------------- ///
+
+/// @brief Retrieve the complex twiddle factor, given the current item number
+///        and the total number of items in the Fourier Transform
+///
+/// @param [in] k    The current DFT index
+/// @param [in] N    The number of DFT elements
+///
+/// @return A complex number that contains the twiddle factor (in the imaginary component)
 __device__ gpuFFT::Complex getTwiddleFactor(unsigned int k, unsigned int N)
 {
   float imaginary = exp(-2 * CUDART_PI_F * k * N);
@@ -11,6 +20,11 @@ __device__ gpuFFT::Complex getTwiddleFactor(unsigned int k, unsigned int N)
   return gpuFFT::Complex(0, imaginary);
 }
 
+/// ---------------   GLOBAL FUNCTIONS   --------------- ///
+
+/// ----------------   HOST FUNCTIONS   ---------------- ///
+
+/// @brief Show how the program is used when it is being used improperly
 __host__ void show_program_usage()
 {
   std::cout << "Improper program use detected. Please see the following for instructions:"                        << std::endl;
@@ -31,5 +45,16 @@ int main(int argc, char* argv[])
     
     return EXIT_FAILURE;
   }
+  
+  // The first argument should be the input file.
+  // Check to see if it exists
+  std::ifstream inputFile(argv[1]);
+  if (!inputFile)
+  {
+    show_program_usage();
+    
+    return EXIT_FAILURE;
+  }
+  
   return EXIT_SUCCESS;
 }
