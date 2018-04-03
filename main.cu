@@ -1,4 +1,5 @@
 #include "Complex.h"
+#include "Filereader.h"
 #include "math_constants.h"
 
 #include <fstream>
@@ -48,8 +49,8 @@ int main(int argc, char* argv[])
   
   // The first argument should be the input file.
   // Check to see if it exists
-  std::ifstream inputFile(argv[1]);
-  if (!inputFile)
+  gpuFFT::Filereader inputFileReader(argv[1]);
+  if (!inputFileReader.exists())
   {
     show_program_usage();
     
