@@ -11,6 +11,9 @@
 #define CUDA_CALLABLE
 #endif
 
+#include <string>
+#include <sstream>
+
 namespace gpuFFT
 {
   class Complex
@@ -223,6 +226,22 @@ namespace gpuFFT
         imag /= other;
         
         return *this;
+      }
+      
+      std::string toString()
+      {
+        std::stringstream ss;
+        
+        ss << real;
+        
+        if (imag >= 0.0f)
+        {
+          ss << "+";
+        }
+        
+        ss << imag << "i";
+        
+        return ss.str();
       }
       
       /// The real portion of the complex number

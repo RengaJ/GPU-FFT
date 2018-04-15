@@ -1,5 +1,10 @@
 #include "Filereader.h"
 
+// Expected file-format:
+//
+// <number of entries>
+// <entry list>
+
 namespace gpuFFT
 {
   Filereader::Filereader(char* filename)
@@ -18,5 +23,10 @@ namespace gpuFFT
   bool Filereader::exists()
   {
     return _stream.is_open();
+  }
+  
+  void Filereader::readFile()
+  {
+    
   }
 }

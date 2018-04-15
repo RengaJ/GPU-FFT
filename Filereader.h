@@ -14,6 +14,8 @@ namespace gpuFFT
       
       bool exists();
       
+      void readFile();
+      
     private:
       std::ifstream _stream;
   };
