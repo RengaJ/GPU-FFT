@@ -1,12 +1,14 @@
-#include "Complex.h"
-#include "Filereader.h"
+#include "Filereader.h"       // Includes Complex, vector and string
 #include "math_constants.h"
 
 #include <fstream>
 #include <iostream>
 
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
+#include "cuda_runtime.h"
+#include "cuda.h"
+
+#define COMPLEX_SIZE sizeof(gpuFFT::Complex)
+#define BLOCK_SIZE 4096
 
 /// ---------------   DEVICE FUNCTIONS   --------------- ///
 
@@ -19,9 +21,9 @@
 /// @return A complex number that contains the twiddle factor (in the imaginary component)
 __device__ gpuFFT::Complex getTwiddleFactor(unsigned int k, unsigned int N)
 {
-  float imaginary = exp(-2 * CUDART_PI_F * k * N);
+/*  float imaginary = exp(-2 * CUDART_PI_F * k * N);
   
-  return gpuFFT::Complex(0, imaginary);
+  return gpuFFT::Complex(0, imaginary); */
 }
 
 /// @brief Retrieve the complex number used in the Discrete Fourier Transform. This has the form
@@ -35,16 +37,24 @@ __device__ gpuFFT::Complex dft_omega(const unsigned int k, const unsigned int n,
 {
   float reciprocal = 1.0f / N;
   float theta      = (-k * n * 2 * CUDART_PI_F * reciprocal);
+
+  gpuFFT::Complex result;
+  result.real = __cosf(theta);
+  result.imag = __sinf(theta);
   
-  return gpuFFT::Complex(cosf(theta), sinf(theta));
+  return result;
 }
 
 __device__ gpuFFT::Complex idft_omega(const unsigned int k, const unsigned int n, const unsigned int N)
 {
   float reciprocal = 1.0f / N;
   float theta      = (k * n * 2 * CUDART_PI_F * reciprocal);
+
+  gpuFFT::Complex result;
+  result.real = cosf(theta);
+  result.imag = sinf(theta);
   
-  return gpuFFT::Complex(cosf(theta), sinf(theta));
+  return result;
 }
 
 /// @brief Compute the Discrete Fourier Transform for a single value
@@ -57,51 +67,73 @@ __device__ gpuFFT::Complex idft_omega(const unsigned int k, const unsigned int n
 ///    k     n = 0   n
 ///
 ///
-__global__ void dft(gpuFFT::Complex* input, gpuFFT::Complex* output, unsigned int size)
+__global__ void dft(gpuFFT::Complex* const input, gpuFFT::Complex* output, unsigned int size)
 {
-  unsigned int k = (blockIdx.x * blockDim.x) + threadIdx.x;
+  __shared__ float input_data[BLOCK_SIZE];
   
-  gpuFFT::Complex result(0, 0);
+  const unsigned int k = (blockIdx.x * blockDim.x) + threadIdx.x;
+  
+  input_data[(2 * k)]     = input[k].real;
+  input_data[(2 * k) + 1] = input[k].imag;
+  
+  __syncthreads();
+  
+  gpuFFT::Complex result;
+  gpuFFT::Complex omega;
   for (unsigned int n = 0; n < size; ++n)
   {
-    result += (input[k] * dft_omega(k, n, size));
+	  omega       = dft_omega(k, n, size);
+	  result.real = result.real + ((input[n].real * omega.real) - (input[n].imag * omega.imag));
+	  result.imag = result.imag + ((input[n].real * omega.imag) + (input[n].imag * omega.real));
   }
   
   output[k] = result;
 }
 
+
+/// @brief Compute the Inverse Discrete Fourier Transform for a single value
+///
+///
+/// The Inverse Discrete Fourier Transform has the following general equation form:
+///
+///       1  N - 1
+///  f  = -*[SIGMA] X  [omega_n]^kn
+///   n   N  k = 0   k
+///
+///
 __global__ void idft(gpuFFT::Complex* input, gpuFFT::Complex* output, unsigned int size)
 {
-  unsigned int n = (blockIdx.x * blockDim.x) + threadIdx.x;
+  /*const unsigned int n = (blockIdx.x * blockDim.x) + threadIdx.x;
   
   gpuFFT::Complex result(0, 0);
+  float reciprocal = 1 / size;
   for (unsigned int k = 0; k < size; ++k)
   {
     result += (input[k] * idft_omega(k, n, size));
   }
   
-  output[n] = result;
+  output[n] = result * reciprocal; */
 }
 
 __device__ unsigned int reverse(unsigned int k, unsigned int n)
 {
-  unsigned int reversed = 0;
+  /*unsigned int reversed = 0;
   unsigned int original = k;
   unsigned int maxIters = (unsigned int) roundf(log2f(n) + 0.5);
   for (unsigned int i = 0; i < maxIters; ++i)
   {
     reversed = (reversed << 1) + ((original >> 1) & 1);
   }
-  
-  return reversed;
+  */
+  return 0;
 }
 
 __device__ void bitReverseCopy(gpuFFT::Complex* a, gpuFFT::Complex* A, unsigned int n)
 {
-  for (unsigned int k = 0; k < n; ++k)
+  /*for (unsigned int k = 0; k < n; ++k)
   {
     A[reverse(k, n)] = a[k];
-  }
+  }*/
 }
 
 __global__ void FFT(gpuFFT::Complex* input, gpuFFT::Complex* output, const unsigned int size)
@@ -136,6 +168,59 @@ __host__ void show_program_usage()
   std::cout << "Please verify your inputs and try again."                                                         << std::endl;
 }
 
+// ====================================================
+//                   EXECUTE DFT
+// ====================================================
+
+void execute_dft(std::vector<gpuFFT::Complex>& data)
+{
+  unsigned int dataSize   = (unsigned int)data.size();
+  unsigned int deviceSize = dataSize * sizeof(gpuFFT::Complex); 
+  
+  // Allocate the host data (output)
+  gpuFFT::Complex* hostData = (gpuFFT::Complex*)malloc(deviceSize);
+  for (unsigned int i = 0; i < dataSize; ++i)
+  {
+    hostData[i] = data[i];
+  }
+  
+  // Allocate the device data
+  gpuFFT::Complex* deviceData;
+  gpuFFT::Complex* deviceOutput;
+  cudaMalloc((void**)&deviceData,   deviceSize);
+  cudaMalloc((void**)&deviceOutput, deviceSize);
+  
+  // Copy the data from the host to the device
+  cudaMemcpy(deviceData, hostData, deviceSize, cudaMemcpyHostToDevice);
+  
+  // Invoke the DFT
+  // dft<<<1, 4, deviceSize>>>(deviceData, deviceOutput, dataSize);
+  dft <<<1, dataSize>>> (deviceData, deviceOutput, dataSize);
+  
+  // Copy the data from the device to the host
+  cudaMemcpy(hostData, deviceOutput, deviceSize, cudaMemcpyDeviceToHost);
+  
+  // Print the results
+  for (unsigned int i = 0; i < dataSize; ++i)
+  {
+	  std::cout << hostData[i].real;
+	  if (hostData[i].imag >= 0.0f)
+	  {
+		  std::cout << "+";
+	  }
+	  std::cout << hostData[i].imag << std::endl;
+  }
+
+  // Perform cleanup
+  cudaFree(&deviceData);
+  cudaFree(&deviceOutput);
+  free(hostData);
+}
+
+// ====================================================
+//                       MAIN
+// ====================================================
+
 int main(int argc, char* argv[])
 {
   if (argc != 3)
@@ -155,7 +240,24 @@ int main(int argc, char* argv[])
     return EXIT_FAILURE;
   }
   
+  std::vector<gpuFFT::Complex> inputData;
   
+  // Read the data in from the file
+  inputFileReader.readFile(inputData);
+  
+  for (unsigned int i = 0; i < inputData.size(); ++i)
+  {
+	  std::cout << inputData[i].real;
+	  if (inputData[i].imag >= 0.0f)
+	  {
+		  std::cout << "+";
+	  }
+	  std::cout << inputData[i].imag << std::endl;
+  }
+  
+  std::cout << "Performing DFT" << std::endl;
+  
+  execute_dft(inputData);
   
   return EXIT_SUCCESS;
 }
