@@ -7,54 +7,34 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 
-#define COMPLEX_SIZE sizeof(gpuFFT::Complex)
-#define BLOCK_SIZE 4096
+#define FLOAT_SIZE sizeof(float)
+#define BLOCK_DIM 1024
 
 /// ---------------   DEVICE FUNCTIONS   --------------- ///
-
-/// @brief Retrieve the complex twiddle factor, given the current item number
-///        and the total number of items in the Fourier Transform
-///
-/// @param [in] k    The current DFT index
-/// @param [in] N    The number of DFT elements
-///
-/// @return A complex number that contains the twiddle factor (in the imaginary component)
-__device__ gpuFFT::Complex getTwiddleFactor(unsigned int k, unsigned int N)
+__device__ float2 dft_omega(const unsigned int k, const unsigned int n, const unsigned int N)
 {
-/*  float imaginary = exp(-2 * CUDART_PI_F * k * N);
-  
-  return gpuFFT::Complex(0, imaginary); */
+	float reciprocal = 1.0f / N;
+	int exponent     = -k * n;
+	float theta      = 2 * exponent * CUDART_PI_F * reciprocal;
+
+	float2 omega;
+	omega.x = cosf(theta);
+	omega.y = sinf(theta);
+
+	return omega;
 }
 
-/// @brief Retrieve the complex number used in the Discrete Fourier Transform. This has the form
-///    -(2pi / N)kn
-///   e             , which can further simplified into the following:
-///
-///   cos((-2*pi*kn)/N) + isin((-2*pi*kn)/N)
-///
-///   This value is used as the multiplicative factor in the Discrete Fourier Transform equation
-__device__ gpuFFT::Complex dft_omega(const unsigned int k, const unsigned int n, const unsigned int N)
+__device__ float2 idft_omega(const unsigned int k, const unsigned int n, const unsigned int N)
 {
   float reciprocal = 1.0f / N;
-  float theta      = (-k * n * 2 * CUDART_PI_F * reciprocal);
+  int exponent     = k * n;
+  float theta      = 2 * exponent * CUDART_PI_F * reciprocal;
 
-  gpuFFT::Complex result;
-  result.real = __cosf(theta);
-  result.imag = __sinf(theta);
+  float2 omega;
+  omega.x = cosf(theta);
+  omega.y = sinf(theta);
   
-  return result;
-}
-
-__device__ gpuFFT::Complex idft_omega(const unsigned int k, const unsigned int n, const unsigned int N)
-{
-  float reciprocal = 1.0f / N;
-  float theta      = (k * n * 2 * CUDART_PI_F * reciprocal);
-
-  gpuFFT::Complex result;
-  result.real = cosf(theta);
-  result.imag = sinf(theta);
-  
-  return result;
+  return omega;
 }
 
 /// @brief Compute the Discrete Fourier Transform for a single value
@@ -67,27 +47,21 @@ __device__ gpuFFT::Complex idft_omega(const unsigned int k, const unsigned int n
 ///    k     n = 0   n
 ///
 ///
-__global__ void dft(gpuFFT::Complex* const input, gpuFFT::Complex* output, unsigned int size)
+__global__ void dft(float* realData,  float* imagData,
+                    float* realInput, float* imagInput,
+                    unsigned int N)
 {
-  __shared__ float input_data[BLOCK_SIZE];
+  const unsigned int k = blockIdx.x * blockDim.x + threadIdx.x; // Row
+  const unsigned int n = threadIdx.x;
   
-  const unsigned int k = (blockIdx.x * blockDim.x) + threadIdx.x;
-  
-  input_data[(2 * k)]     = input[k].real;
-  input_data[(2 * k) + 1] = input[k].imag;
-  
-  __syncthreads();
-  
-  gpuFFT::Complex result;
-  gpuFFT::Complex omega;
-  for (unsigned int n = 0; n < size; ++n)
-  {
-	  omega       = dft_omega(k, n, size);
-	  result.real = result.real + ((input[n].real * omega.real) - (input[n].imag * omega.imag));
-	  result.imag = result.imag + ((input[n].real * omega.imag) + (input[n].imag * omega.real));
-  }
-  
-  output[k] = result;
+  float2 omega = dft_omega(blockIdx.x, n, N);
+
+  printf("k = %u, blockIdx.x = %u, n = %u\n", k, blockIdx.x, n);
+  printf("-- omega.x = %f, omega.y = %f\n", omega.x, omega.y);
+  printf("-- realInput[n] = %f, imagInput[n] = %f\n", realInput[n], imagInput[n]);
+
+  realData[k] = (realInput[n] * omega.x) - (imagInput[n] * omega.y);
+  imagData[k] = (realInput[n] * omega.y) + (imagInput[n] * omega.x);
 }
 
 
@@ -101,54 +75,17 @@ __global__ void dft(gpuFFT::Complex* const input, gpuFFT::Complex* output, unsig
 ///   n   N  k = 0   k
 ///
 ///
-__global__ void idft(gpuFFT::Complex* input, gpuFFT::Complex* output, unsigned int size)
+__global__ void idft(float* realData,  float* imagData,
+	                 float* realInput, float* imagInput,
+	                 unsigned int N)
 {
-  /*const unsigned int n = (blockIdx.x * blockDim.x) + threadIdx.x;
-  
-  gpuFFT::Complex result(0, 0);
-  float reciprocal = 1 / size;
-  for (unsigned int k = 0; k < size; ++k)
-  {
-    result += (input[k] * idft_omega(k, n, size));
-  }
-  
-  output[n] = result * reciprocal; */
-}
+	const unsigned int n = blockIdx.x * blockDim.x + threadIdx.x;
+	const unsigned int k = threadIdx.x;
 
-__device__ unsigned int reverse(unsigned int k, unsigned int n)
-{
-  /*unsigned int reversed = 0;
-  unsigned int original = k;
-  unsigned int maxIters = (unsigned int) roundf(log2f(n) + 0.5);
-  for (unsigned int i = 0; i < maxIters; ++i)
-  {
-    reversed = (reversed << 1) + ((original >> 1) & 1);
-  }
-  */
-  return 0;
-}
+	float2 omega = idft_omega(k, blockIdx.x, N);
 
-__device__ void bitReverseCopy(gpuFFT::Complex* a, gpuFFT::Complex* A, unsigned int n)
-{
-  /*for (unsigned int k = 0; k < n; ++k)
-  {
-    A[reverse(k, n)] = a[k];
-  }*/
-}
-
-__global__ void FFT(gpuFFT::Complex* input, gpuFFT::Complex* output, const unsigned int size)
-{
-  // bitReverseCopy(input, A, size);
-  /*unsigned int maxIters = (unsigned int) roundf(log2f(n) + 0.5);
-  for (unsigned int s = 1; s < maxIters; ++s)
-  {
-    unsigned int m = powf(2, s);
-    gpuFFT::Complex twiddle = getTwiddleFactor(m, size);
-    for (unsigned int k = 0; k < size; k += m)
-    {
-      
-    }
-  }*/
+	realData[n] = (realInput[k] * omega.x) - (imagInput[k] * omega.y);
+	imagData[n] = (realInput[k] * omega.y) + (imagInput[k] * omega.x);
 }
 
 /// ---------------   GLOBAL FUNCTIONS   --------------- ///
@@ -168,53 +105,106 @@ __host__ void show_program_usage()
   std::cout << "Please verify your inputs and try again."                                                         << std::endl;
 }
 
+__host__ unsigned int getNearestEven(unsigned int input)
+{
+  if (input % BLOCK_DIM == 0)
+  {
+    return input / BLOCK_DIM;
+  }
+  return input / BLOCK_DIM + 1;
+}
+
 // ====================================================
 //                   EXECUTE DFT
 // ====================================================
 
-void execute_dft(std::vector<gpuFFT::Complex>& data)
+void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
 {
-  unsigned int dataSize   = (unsigned int)data.size();
-  unsigned int deviceSize = dataSize * sizeof(gpuFFT::Complex); 
+  unsigned int dataSize   = (unsigned int)realParts.size();
+  unsigned int deviceSize = dataSize * sizeof(float); 
   
-  // Allocate the host data (output)
-  gpuFFT::Complex* hostData = (gpuFFT::Complex*)malloc(deviceSize);
-  for (unsigned int i = 0; i < dataSize; ++i)
+  // Allocate the host data
+  float* realResiduals;
+  float* imagResiduals;
+
+  float* hostRealData = (float*)malloc(deviceSize * dataSize);
+  float* hostImagData = (float*)malloc(deviceSize * dataSize);
+
+  for (unsigned int i = 0; i < dataSize * dataSize; ++i)
   {
-    hostData[i] = data[i];
+	  hostRealData[i] = 0.0f;
+	  hostImagData[i] = 0.0f;
   }
+
+  float* deviceRealData;
+  float* deviceImagData;
   
   // Allocate the device data
-  gpuFFT::Complex* deviceData;
-  gpuFFT::Complex* deviceOutput;
-  cudaMalloc((void**)&deviceData,   deviceSize);
-  cudaMalloc((void**)&deviceOutput, deviceSize);
+  cudaMalloc(&realResiduals, deviceSize * dataSize);
+  cudaMalloc(&imagResiduals, deviceSize * dataSize);
   
+  cudaMalloc(&deviceRealData, deviceSize);
+  cudaMalloc(&deviceImagData, deviceSize);
+
+  cudaMemset(realResiduals, 0, deviceSize * dataSize);
+  cudaMemset(imagResiduals, 0, deviceSize * dataSize);
+
   // Copy the data from the host to the device
-  cudaMemcpy(deviceData, hostData, deviceSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(deviceRealData, &realParts[0], deviceSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(deviceImagData, &imagParts[0], deviceSize, cudaMemcpyHostToDevice);
   
   // Invoke the DFT
-  // dft<<<1, 4, deviceSize>>>(deviceData, deviceOutput, dataSize);
-  dft <<<1, dataSize>>> (deviceData, deviceOutput, dataSize);
+  int dimensionSize = getNearestEven(dataSize);
+  dim3 gridSize(dataSize, dataSize);
+  dim3 blockSize(BLOCK_DIM, BLOCK_DIM);
+  dft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+  
+  cudaDeviceSynchronize();
   
   // Copy the data from the device to the host
-  cudaMemcpy(hostData, deviceOutput, deviceSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(hostRealData, realResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(hostImagData, imagResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
   
-  // Print the results
+  std::vector<float> realResult(dataSize);
+  std::vector<float> imagResult(dataSize);
+  
   for (unsigned int i = 0; i < dataSize; ++i)
   {
-	  std::cout << hostData[i].real;
-	  if (hostData[i].imag >= 0.0f)
+    realResult[i] = 0.0f;
+    imagResult[i] = 0.0f;
+    for (unsigned int j = 0; j < dataSize; ++j)
+    {
+		int index = (i * dataSize) + j;
+		float realResidual = hostRealData[index];
+		float imagResidual = hostImagData[index];
+
+		std::cout << "(" << i << ", " << j << ") : ( " << realResidual << ", " << imagResidual << " )";
+		std::cout << " -- " << index << std::endl;
+		realResult[i] += realResidual;
+		imagResult[i] += imagResidual;
+    }
+  }
+  
+  for (unsigned int i = 0; i < realResult.size(); ++i)
+  {
+    std::cout << realResult[i];
+    
+	  if (imagResult[i] >= 0.0f)
 	  {
 		  std::cout << "+";
 	  }
-	  std::cout << hostData[i].imag << std::endl;
+	  std::cout << imagResult[i] << "i" << std::endl;
   }
-
+  
+  // Print the results
   // Perform cleanup
-  cudaFree(&deviceData);
-  cudaFree(&deviceOutput);
-  free(hostData);
+  cudaFree(realResiduals);
+  cudaFree(imagResiduals);
+  cudaFree(deviceRealData);
+  cudaFree(deviceImagData);
+ 
+  free(hostRealData);
+  free(hostImagData);
 }
 
 // ====================================================
@@ -242,22 +232,26 @@ int main(int argc, char* argv[])
   
   std::vector<gpuFFT::Complex> inputData;
   
-  // Read the data in from the file
-  inputFileReader.readFile(inputData);
+  std::vector<float> realParts;
+  std::vector<float> imagParts;
   
-  for (unsigned int i = 0; i < inputData.size(); ++i)
+  // Read the data in from the file
+  inputFileReader.readFile(realParts, imagParts);
+  
+  for (unsigned int i = 0; i < realParts.size(); ++i)
   {
-	  std::cout << inputData[i].real;
-	  if (inputData[i].imag >= 0.0f)
+    std::cout << realParts[i];
+    
+	  if (imagParts[i] >= 0.0f)
 	  {
 		  std::cout << "+";
 	  }
-	  std::cout << inputData[i].imag << std::endl;
+	  std::cout << imagParts[i] << "i" << std::endl;
   }
   
   std::cout << "Performing DFT" << std::endl;
   
-  execute_dft(inputData);
+  execute_dft(realParts, imagParts);
   
   return EXIT_SUCCESS;
 }
