@@ -1,4 +1,6 @@
 #include "Filereader.h"       // Includes Complex, vector and string
+
+#include "CPUDFT.h"
 #include "math_constants.h"
 
 #include <fstream>
@@ -15,7 +17,7 @@ __device__ float2 dft_omega(const unsigned int k, const unsigned int n, const un
 {
 	float reciprocal = 1.0f / N;
 	int exponent     = -k * n;
-	float theta      = 2 * exponent * CUDART_PI_F * reciprocal;
+	float theta      = 2.0f * exponent * CUDART_PI_F * reciprocal;
 
 	float2 omega;
 	omega.x = cosf(theta);
@@ -28,8 +30,8 @@ __device__ float2 idft_omega(const unsigned int k, const unsigned int n, const u
 {
   float reciprocal = 1.0f / N;
   int exponent     = k * n;
-  float theta      = 2 * exponent * CUDART_PI_F * reciprocal;
-
+  float theta      = 2.0f * exponent * CUDART_PI_F * reciprocal;
+  
   float2 omega;
   omega.x = cosf(theta);
   omega.y = sinf(theta);
@@ -55,10 +57,6 @@ __global__ void dft(float* realData,  float* imagData,
   const unsigned int n = threadIdx.x;
   
   float2 omega = dft_omega(blockIdx.x, n, N);
-
-  printf("k = %u, blockIdx.x = %u, n = %u\n", k, blockIdx.x, n);
-  printf("-- omega.x = %f, omega.y = %f\n", omega.x, omega.y);
-  printf("-- realInput[n] = %f, imagInput[n] = %f\n", realInput[n], imagInput[n]);
 
   realData[k] = (realInput[n] * omega.x) - (imagInput[n] * omega.y);
   imagData[k] = (realInput[n] * omega.y) + (imagInput[n] * omega.x);
@@ -105,15 +103,6 @@ __host__ void show_program_usage()
   std::cout << "Please verify your inputs and try again."                                                         << std::endl;
 }
 
-__host__ unsigned int getNearestEven(unsigned int input)
-{
-  if (input % BLOCK_DIM == 0)
-  {
-    return input / BLOCK_DIM;
-  }
-  return input / BLOCK_DIM + 1;
-}
-
 // ====================================================
 //                   EXECUTE DFT
 // ====================================================
@@ -154,9 +143,6 @@ void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
   cudaMemcpy(deviceImagData, &imagParts[0], deviceSize, cudaMemcpyHostToDevice);
   
   // Invoke the DFT
-  int dimensionSize = getNearestEven(dataSize);
-  dim3 gridSize(dataSize, dataSize);
-  dim3 blockSize(BLOCK_DIM, BLOCK_DIM);
   dft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
   
   cudaDeviceSynchronize();
@@ -178,8 +164,6 @@ void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
 		float realResidual = hostRealData[index];
 		float imagResidual = hostImagData[index];
 
-		std::cout << "(" << i << ", " << j << ") : ( " << realResidual << ", " << imagResidual << " )";
-		std::cout << " -- " << index << std::endl;
 		realResult[i] += realResidual;
 		imagResult[i] += imagResidual;
     }
@@ -189,6 +173,49 @@ void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
   {
     std::cout << realResult[i];
     
+	  if (imagResult[i] >= 0.0f)
+	  {
+		  std::cout << "+";
+	  }
+	  std::cout << imagResult[i] << "i" << std::endl;
+  }
+
+  // Copy the results back into the device real and imaginary parts
+  cudaMemcpy(deviceRealData, &realResult[0], deviceSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(deviceImagData, &imagResult[0], deviceSize, cudaMemcpyHostToDevice);
+
+  // Invoke the IDFT
+  idft << < dataSize, dataSize >> > (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+
+  // Copy the data from the device to the host
+  cudaMemcpy(hostRealData, realResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(hostImagData, imagResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
+
+  realResult.clear();
+  imagResult.clear();
+
+  realResult.resize(dataSize, 0.0f);
+  imagResult.resize(dataSize, 0.0f);
+
+  for (unsigned int i = 0; i < dataSize; ++i)
+  {
+	  realResult[i] = 0.0f;
+	  imagResult[i] = 0.0f;
+	  for (unsigned int j = 0; j < dataSize; ++j)
+	  {
+		  int index = (i * dataSize) + j;
+		  float realResidual = hostRealData[index];
+		  float imagResidual = hostImagData[index];
+
+		  realResult[i] += realResidual / dataSize;
+		  imagResult[i] += imagResidual / dataSize;
+	  }
+  }
+
+  for (unsigned int i = 0; i < realResult.size(); ++i)
+  {
+	  std::cout << realResult[i];
+
 	  if (imagResult[i] >= 0.0f)
 	  {
 		  std::cout << "+";
@@ -213,7 +240,7 @@ void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
 
 int main(int argc, char* argv[])
 {
-  if (argc != 3)
+  if (argc != 2)
   {
     show_program_usage();
     
@@ -229,8 +256,6 @@ int main(int argc, char* argv[])
     
     return EXIT_FAILURE;
   }
-  
-  std::vector<gpuFFT::Complex> inputData;
   
   std::vector<float> realParts;
   std::vector<float> imagParts;
@@ -249,9 +274,26 @@ int main(int argc, char* argv[])
 	  std::cout << imagParts[i] << "i" << std::endl;
   }
   
-  std::cout << "Performing DFT" << std::endl;
-  
   execute_dft(realParts, imagParts);
+
+  gpuFFT::CPUDFT cpuDFT(realParts, imagParts);
+  std::vector<float> transformedReal;
+  std::vector<float> transformedImag;
+
+  cpuDFT.dft(transformedReal, transformedImag);
+
+  for (unsigned int i = 0; i < transformedReal.size(); ++i)
+  {
+	  std::cout << "CPU DFT [" << i << "] = (" << transformedReal[i] << ", " << transformedImag[i] << ")" << std::endl;
+  }
+
+  gpuFFT::CPUDFT cpuIDFT(transformedReal, transformedImag);
+  cpuIDFT.idft(transformedReal, transformedImag);
+
+  for (unsigned int i = 0; i < transformedReal.size(); ++i)
+  {
+	  std::cout << "CPU IDFT [" << i << "] = (" << transformedReal[i] << ", " << transformedImag[i] << ")" << std::endl;
+  }
   
   return EXIT_SUCCESS;
 }
