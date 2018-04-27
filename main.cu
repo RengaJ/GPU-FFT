@@ -1,4 +1,5 @@
-#include "Filereader.h"       // Includes Complex, vector and string
+#include "Filereader.h"
+#include "Filewriter.h"
 
 #include "CPUDFT.h"
 #include "math_constants.h"
@@ -94,11 +95,10 @@ __global__ void idft(float* realData,  float* imagData,
 __host__ void show_program_usage()
 {
   std::cout << "Improper program use detected. Please see the following for instructions:"                        << std::endl;
-  std::cout << "\tgpuFFT.exe <input_file> <output_file_location>"                                                 << std::endl;
+  std::cout << "\tgpuFFT.exe <input_file>"                                                                        << std::endl;
   std::cout << ""                                                                                                 << std::endl;
   std::cout << "input_file           - The input file containg the data on which to perform the FFT (must exist)" << std::endl;
   std::cout << "                       * Must have the .dat extension * "                                         << std::endl;
-  std::cout << "output_file_location - The location where the output.dat file will be created (must exist)"       << std::endl;
   std::cout << ""                                                                                                 << std::endl;
   std::cout << "Please verify your inputs and try again."                                                         << std::endl;
 }
@@ -107,7 +107,7 @@ __host__ void show_program_usage()
 //                   EXECUTE DFT
 // ====================================================
 
-void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
+void execute_gpu_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
 {
   unsigned int dataSize   = (unsigned int)realParts.size();
   unsigned int deviceSize = dataSize * sizeof(float); 
@@ -185,7 +185,7 @@ void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
   cudaMemcpy(deviceImagData, &imagResult[0], deviceSize, cudaMemcpyHostToDevice);
 
   // Invoke the IDFT
-  idft << < dataSize, dataSize >> > (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+  idft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
 
   // Copy the data from the device to the host
   cudaMemcpy(hostRealData, realResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
@@ -223,15 +223,51 @@ void execute_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
 	  std::cout << imagResult[i] << "i" << std::endl;
   }
   
-  // Print the results
-  // Perform cleanup
+  // Free the device-memory
   cudaFree(realResiduals);
   cudaFree(imagResiduals);
   cudaFree(deviceRealData);
   cudaFree(deviceImagData);
  
+  // Free the host-memory
   free(hostRealData);
   free(hostImagData);
+}
+
+/// @brief  Executes the CPU-based Discrete Fourier Transform
+///         (and inverse Discrete Fourier Transform)
+///
+/// @param[in] real    The real parts of the input
+/// @param[in] imag    The imaginary parts of the input
+
+// TODO: ADD OUTPUTS FOR TIMINGS (DFT and IDFT)
+void execute_cpu_dft(std::vector<float>& real, std::vector<float>& imag)
+{
+	// Create the CPU-based DFT object
+	gpuFFT::CPUDFT cpuDFT(real, imag);
+
+	// Create vectors to contain the transformed data
+	std::vector<float> transformedReal;
+	std::vector<float> transformedImag;
+
+	// Perform the Discrete Fourier Transform
+	// (note that the DFT operation does not affect the original input)
+	cpuDFT.dft(transformedReal, transformedImag);
+
+	// Write out the DFT results to a file
+	gpuFFT::Filewriter cpuDFTWriter("cpu_dft_output.dat");
+	cpuDFTWriter.write(transformedReal, transformedImag);
+
+	// Create the CPU-based DFT object for the inverse DFT
+	gpuFFT::CPUDFT cpuIDFT(transformedReal, transformedImag);
+
+	// Perform the Inverse Discrete Fourier Transform
+	// (note that the IDFT operation does not affect the original input)
+	cpuIDFT.idft(transformedReal, transformedImag);
+
+	// Write out the IDFT results to a file
+	gpuFFT::Filewriter writer("cpu_output.dat");
+	writer.write(transformedReal, transformedImag);
 }
 
 // ====================================================
@@ -257,12 +293,14 @@ int main(int argc, char* argv[])
     return EXIT_FAILURE;
   }
   
+  // TODO: CLEAN UP AND DOCUMENT
   std::vector<float> realParts;
   std::vector<float> imagParts;
   
   // Read the data in from the file
   inputFileReader.readFile(realParts, imagParts);
   
+  // Perform some output [DEBUG - TO BE REMOVED]
   for (unsigned int i = 0; i < realParts.size(); ++i)
   {
     std::cout << realParts[i];
@@ -274,26 +312,15 @@ int main(int argc, char* argv[])
 	  std::cout << imagParts[i] << "i" << std::endl;
   }
   
-  execute_dft(realParts, imagParts);
+  // ===========================================
+  // Execute the GPU DFT
+  // ===========================================
+  execute_gpu_dft(realParts, imagParts);
 
-  gpuFFT::CPUDFT cpuDFT(realParts, imagParts);
-  std::vector<float> transformedReal;
-  std::vector<float> transformedImag;
+  // ===========================================
+  // Execute the CPU DFT
+  // ===========================================
+  execute_cpu_dft(realParts, imagParts);  
 
-  cpuDFT.dft(transformedReal, transformedImag);
-
-  for (unsigned int i = 0; i < transformedReal.size(); ++i)
-  {
-	  std::cout << "CPU DFT [" << i << "] = (" << transformedReal[i] << ", " << transformedImag[i] << ")" << std::endl;
-  }
-
-  gpuFFT::CPUDFT cpuIDFT(transformedReal, transformedImag);
-  cpuIDFT.idft(transformedReal, transformedImag);
-
-  for (unsigned int i = 0; i < transformedReal.size(); ++i)
-  {
-	  std::cout << "CPU IDFT [" << i << "] = (" << transformedReal[i] << ", " << transformedImag[i] << ")" << std::endl;
-  }
-  
   return EXIT_SUCCESS;
 }

@@ -3,7 +3,6 @@
 
 #include <vector>
 #include <fstream>
-#include "Complex.h"
 
 namespace gpuFFT
 {
@@ -16,7 +15,6 @@ namespace gpuFFT
       
       bool exists();
       
-      void readFile(std::vector<Complex>& data);
       void readFile(std::vector<float>& reals, std::vector<float>& imags);
       
     private:
