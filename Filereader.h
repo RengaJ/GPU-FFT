@@ -9,7 +9,7 @@ namespace gpuFFT
   class Filereader
   {
     public:
-      Filereader(char* filename);
+      Filereader(std::string filename);
       
       ~Filereader();
       

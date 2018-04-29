@@ -9,9 +9,9 @@
 
 namespace gpuFFT
 {
-  Filereader::Filereader(char* filename)
+  Filereader::Filereader(std::string filename)
   {
-    _stream = std::ifstream(filename);
+    _stream = std::ifstream(filename.c_str());
   }
   
   Filereader::~Filereader()

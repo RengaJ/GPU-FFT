@@ -7,6 +7,6 @@ if [ -z "$NVCC_LIBRARY_PATH" ]; then
   exit 1
 fi
 
-nvcc Filewriter.cpp CPUDFT.cpp Filereader.cpp main.cu -L "$NVCC_LIBRARY_PATH" -lcudart -o gpuFFT.exe
+nvcc CommandLineParser.cpp Filewriter.cpp CPUDFT.cpp Filereader.cpp main.cu -L "$NVCC_LIBRARY_PATH" -lcudart -o gpuFFT.exe
 
-./gpuFFT.exe test_input.dat
+./gpuFFT.exe test_input.dat --compare
