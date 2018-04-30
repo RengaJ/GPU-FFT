@@ -118,7 +118,9 @@ __global__ void idft(float* realData,  float* imagData,
 	imagData[n] = (realInput[k] * omega.y) + (imagInput[k] * omega.x);
 }
 
+/// //////////////////////////////////////////////////// ///
 /// ----------------   HOST FUNCTIONS   ---------------- ///
+/// //////////////////////////////////////////////////// ///
 
 /// @brief Show how the program is used when it is being used improperly
 __host__ void show_program_usage()
@@ -143,47 +145,120 @@ __host__ void show_program_usage()
   std::cout << "Please verify your inputs and try again."                                                         << std::endl;
 }
 
+/// //////////////////////////////////////////////////// ///
+/// --------------   UTILITY FUNCTIONS   --------------- ///
+/// //////////////////////////////////////////////////// ///
+
+/// @brief Allocate an array of float data on the host-side. This will
+///        also ensure the data is initialized to zero prior to being
+///        used.
+///
+///        *** NOTE *** This array needs to be freed with the freeHostMemory
+///                     function. It will not be freed automatically.
+///
+/// @param [in] numElements    The number of elements for which to allocate.
+///
+/// @return The allocated array of float data.
+float* allocateHostData(unsigned int numElements)
+{
+  float* input = (float*)calloc(numElements, FLOAT_SIZE);
+
+  return input;
+}
+
+void allocateDeviceMemory(float** input, unsigned int size)
+{
+  cudaMalloc((void**)input, size);
+  cudaMemset(*input, 0, size);
+}
+
+void freeDeviceMemory(float* input)
+{
+  cudaFree(input);
+}
+
+
+
+/// @brief Free an allocated float array.
+///
+/// @param [in] input   The float array to de-allocate (free)
+void freeHostMemory(float* input)
+{
+  if (input != NULL)
+  {
+    free(input);
+  }
+}
+
 // ====================================================
 //                   EXECUTE DFT
 // ====================================================
-
-void execute_gpu_dft(std::vector<float>& realParts, std::vector<float>& imagParts)
+void execute_gpu_fourier_transform(
+  std::vector<float>& realParts,
+  std::vector<float>& imagParts,
+  gpuFFT::ModeFlag modeFlag)
 {
   unsigned int dataSize   = (unsigned int)realParts.size();
-  unsigned int deviceSize = dataSize * FLOAT_SIZE; 
+  unsigned int deviceSize = dataSize * FLOAT_SIZE;
+
+  std::string filename =
+    (modeFlag == gpuFFT::GPU_DFT_ONLY ? "gpu_dft_output.dat" : "gpu_idft_output.dat");
   
   // Allocate the host data
+  float* hostRealData = allocateHostData(dataSize * dataSize);
+  float* hostImagData = allocateHostData(dataSize * dataSize);
+
+  // Allocate the device data
+  float* deviceRealData;
+  float* deviceImagData;
   float* realResiduals;
   float* imagResiduals;
 
-  float* hostRealData = (float*)malloc(deviceSize * dataSize);
-  float* hostImagData = (float*)malloc(deviceSize * dataSize);
+  allocateDeviceMemory(&deviceRealData, deviceSize);
+  allocateDeviceMemory(&deviceImagData, deviceSize);
+  allocateDeviceMemory(&realResiduals,  deviceSize * dataSize);
+  allocateDeviceMemory(&imagResiduals,  deviceSize * dataSize);
 
-  for (unsigned int i = 0; i < dataSize * dataSize; ++i)
-  {
-	  hostRealData[i] = 0.0f;
-	  hostImagData[i] = 0.0f;
-  }
+  // Create CUDA event data
+  cudaEvent_t fourierTransformStartEvent;
+  cudaEvent_t fourierTransformEndEvent;
 
-  float* deviceRealData;
-  float* deviceImagData;
-  
-  // Allocate the device data
-  cudaMalloc(&realResiduals, deviceSize * dataSize);
-  cudaMalloc(&imagResiduals, deviceSize * dataSize);
-  
-  cudaMalloc(&deviceRealData, deviceSize);
-  cudaMalloc(&deviceImagData, deviceSize);
-
-  cudaMemset(realResiduals, 0, deviceSize * dataSize);
-  cudaMemset(imagResiduals, 0, deviceSize * dataSize);
+  cudaEventCreate(&fourierTransformStartEvent);
+  cudaEventCreate(&fourierTransformEndEvent);
 
   // Copy the data from the host to the device
   cudaMemcpy(deviceRealData, &realParts[0], deviceSize, cudaMemcpyHostToDevice);
   cudaMemcpy(deviceImagData, &imagParts[0], deviceSize, cudaMemcpyHostToDevice);
   
-  // Invoke the DFT
-  dft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+  // Start event recording
+  cudaEventRecord(fourierTransformStartEvent);
+
+  if (modeFlag == gpuFFT::GPU_DFT_ONLY)
+  {
+    // Invoke the DFT
+    dft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+  }
+  else if (modeFlag == gpuFFT::GPU_IDFT_ONLY)
+  {
+    // Invoke the IDFT
+    idft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+  }
+  else
+  {
+    // Perform clean up
+    freeDeviceMemory(deviceRealData);
+    freeDeviceMemory(deviceImagData);
+    freeDeviceMemory(realResiduals );
+    freeDeviceMemory(imagResiduals );
+    freeHostMemory(hostRealData);
+    freeHostMemory(hostImagData);
+
+    // Throw an error
+    throw std::runtime_error("*** GPU FOURIER *** INVALID MODE FLAG");
+  }
+
+  cudaEventRecord(fourierTransformEndEvent);
+  cudaEventSynchronize(fourierTransformEndEvent);
   
   cudaDeviceSynchronize();
   
@@ -191,8 +266,13 @@ void execute_gpu_dft(std::vector<float>& realParts, std::vector<float>& imagPart
   cudaMemcpy(hostRealData, realResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
   cudaMemcpy(hostImagData, imagResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
   
+  // INSTEAD OF USING STL VECTOR, CONSIDER USING THRUST VECTOR AND USING THE
+  // REDUCE OPERTIONS
   std::vector<float> realResult(dataSize);
   std::vector<float> imagResult(dataSize);
+
+  float reciprocal =
+    (modeFlag == gpuFFT::GPU_DFT_ONLY ? 1.0f : 1.0f / dataSize);
   
   for (unsigned int i = 0; i < dataSize; ++i)
   {
@@ -200,78 +280,25 @@ void execute_gpu_dft(std::vector<float>& realParts, std::vector<float>& imagPart
     imagResult[i] = 0.0f;
     for (unsigned int j = 0; j < dataSize; ++j)
     {
-		int index = (i * dataSize) + j;
-		float realResidual = hostRealData[index];
-		float imagResidual = hostImagData[index];
-
-		realResult[i] += realResidual;
-		imagResult[i] += imagResidual;
+		  int index = (i * dataSize) + j;
+		  realResult[i] += hostRealData[index] * reciprocal;
+		  imagResult[i] += hostImagData[index] * reciprocal;
     }
   }
   
-  for (unsigned int i = 0; i < realResult.size(); ++i)
-  {
-    std::cout << realResult[i];
-    
-	  if (imagResult[i] >= 0.0f)
-	  {
-		  std::cout << "+";
-	  }
-	  std::cout << imagResult[i] << "i" << std::endl;
-  }
+  // Write the results to a file
+  gpuFFT::Filewriter gpuFourierWriter(filename);
+  gpuFourierWriter.write(realResult, imagResult);
 
-  // Copy the results back into the device real and imaginary parts
-  cudaMemcpy(deviceRealData, &realResult[0], deviceSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(deviceImagData, &imagResult[0], deviceSize, cudaMemcpyHostToDevice);
-
-  // Invoke the IDFT
-  idft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
-
-  // Copy the data from the device to the host
-  cudaMemcpy(hostRealData, realResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
-  cudaMemcpy(hostImagData, imagResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
-
-  realResult.clear();
-  imagResult.clear();
-
-  realResult.resize(dataSize, 0.0f);
-  imagResult.resize(dataSize, 0.0f);
-
-  for (unsigned int i = 0; i < dataSize; ++i)
-  {
-	  realResult[i] = 0.0f;
-	  imagResult[i] = 0.0f;
-	  for (unsigned int j = 0; j < dataSize; ++j)
-	  {
-		  int index = (i * dataSize) + j;
-		  float realResidual = hostRealData[index];
-		  float imagResidual = hostImagData[index];
-
-		  realResult[i] += realResidual / dataSize;
-		  imagResult[i] += imagResidual / dataSize;
-	  }
-  }
-
-  for (unsigned int i = 0; i < realResult.size(); ++i)
-  {
-	  std::cout << realResult[i];
-
-	  if (imagResult[i] >= 0.0f)
-	  {
-		  std::cout << "+";
-	  }
-	  std::cout << imagResult[i] << "i" << std::endl;
-  }
-  
   // Free the device-memory
-  cudaFree(realResiduals);
-  cudaFree(imagResiduals);
-  cudaFree(deviceRealData);
-  cudaFree(deviceImagData);
+  freeDeviceMemory(deviceRealData);
+  freeDeviceMemory(deviceImagData);
+  freeDeviceMemory(realResiduals );
+  freeDeviceMemory(imagResiduals );
  
   // Free the host-memory
-  free(hostRealData);
-  free(hostImagData);
+  freeHostMemory(hostRealData);
+  freeHostMemory(hostImagData);
 }
 
 /// @brief  Executes the CPU-based Discrete Fourier Transform
@@ -281,33 +308,48 @@ void execute_gpu_dft(std::vector<float>& realParts, std::vector<float>& imagPart
 /// @param[in] imag    The imaginary parts of the input
 
 // TODO: ADD OUTPUTS FOR TIMINGS (DFT and IDFT)
-void execute_cpu_dft(std::vector<float>& real, std::vector<float>& imag)
+void execute_cpu_fourier_transform(
+  std::vector<float>& real,
+  std::vector<float>& imag,
+  gpuFFT::ModeFlag modeFlag)
 {
 	// Create the CPU-based DFT object
-	gpuFFT::CPUDFT cpuDFT(real, imag);
+	gpuFFT::CPUDFT cpuFourier(real, imag);
 
 	// Create vectors to contain the transformed data
 	std::vector<float> transformedReal;
 	std::vector<float> transformedImag;
 
-	// Perform the Discrete Fourier Transform
-	// (note that the DFT operation does not affect the original input)
-	cpuDFT.dft(transformedReal, transformedImag);
+  std::string filename;
+
+  // Check the operating mode
+  if (modeFlag == gpuFFT::CPU_DFT_ONLY)
+  {
+	  // Perform the Discrete Fourier Transform
+	  // (note that the DFT operation does not affect the original input)
+	  cpuFourier.dft(transformedReal, transformedImag);
+
+    filename = "cpu_dft_output.dat";
+  }
+
+  else if (modeFlag == gpuFFT::CPU_IDFT_ONLY)
+  {
+	  // Perform the Inverse Discrete Fourier Transform
+	  // (note that the IDFT operation does not affect the original input)
+	  cpuFourier.idft(transformedReal, transformedImag);
+
+    filename = "cpu_idft_output.dat";
+  }
+
+  // If the operating mode is invalid, throw a runtime error
+  else
+  {
+    throw std::runtime_error("*** CPU FOURIER *** INVALID MODE FLAG");
+  }
 
 	// Write out the DFT results to a file
-	gpuFFT::Filewriter cpuDFTWriter("cpu_dft_output.dat");
-	cpuDFTWriter.write(transformedReal, transformedImag);
-
-	// Create the CPU-based DFT object for the inverse DFT
-	gpuFFT::CPUDFT cpuIDFT(transformedReal, transformedImag);
-
-	// Perform the Inverse Discrete Fourier Transform
-	// (note that the IDFT operation does not affect the original input)
-	cpuIDFT.idft(transformedReal, transformedImag);
-
-	// Write out the IDFT results to a file
-	gpuFFT::Filewriter writer("cpu_output.dat");
-	writer.write(transformedReal, transformedImag);
+	gpuFFT::Filewriter cpuFourierWriter(filename);
+	cpuFourierWriter.write(transformedReal, transformedImag);
 }
 
 // ====================================================
@@ -334,39 +376,48 @@ int main(int argc, char* argv[])
     return EXIT_FAILURE;
   }
   
-  // TODO: CLEAN UP AND DOCUMENT
+  // Provide the vectors for storing the real and imaginary portions
+  // of the input data
   std::vector<float> realParts;
   std::vector<float> imagParts;
   
   // Read the data in from the file
   inputFileReader.readFile(realParts, imagParts);
   
-  // Perform some output [DEBUG - TO BE REMOVED]
-  for (unsigned int i = 0; i < realParts.size(); ++i)
-  {
-    std::cout << realParts[i];
-    
-	  if (imagParts[i] >= 0.0f)
-	  {
-		  std::cout << "+";
-	  }
-	  std::cout << imagParts[i] << "i" << std::endl;
-  }
-  
   // ===========================================
   // Execute the GPU DFT
   // ===========================================
-  if (parsedInput.mode | gpuFFT::ModeFlag::GPU_DFT_ONLY)
+  if (parsedInput.mode & gpuFFT::ModeFlag::GPU_DFT_ONLY)
   {
-    execute_gpu_dft(realParts, imagParts);
+    execute_gpu_fourier_transform(
+      realParts, imagParts, gpuFFT::ModeFlag::GPU_DFT_ONLY);
+  }
+
+  // ===========================================
+  // Execute the GPU IDFT
+  // ===========================================
+  if (parsedInput.mode & gpuFFT::GPU_IDFT_ONLY)
+  {
+    execute_gpu_fourier_transform(
+      realParts, imagParts, gpuFFT::GPU_IDFT_ONLY);
   }
 
   // ===========================================
   // Execute the CPU DFT
   // ===========================================
-  if (parsedInput.mode | gpuFFT::ModeFlag::CPU_DFT_ONLY)
+  if (parsedInput.mode & gpuFFT::CPU_DFT_ONLY)
   {
-    execute_cpu_dft(realParts, imagParts);  
+    execute_cpu_fourier_transform(
+      realParts, imagParts, gpuFFT::CPU_DFT_ONLY);
+  }
+
+  // ===========================================
+  // Execute the CPU IDFT
+  // ===========================================
+  if (parsedInput.mode & gpuFFT::CPU_IDFT_ONLY)
+  {
+    execute_cpu_fourier_transform(
+      realParts, imagParts, gpuFFT::CPU_IDFT_ONLY);
   }
 
   return EXIT_SUCCESS;
