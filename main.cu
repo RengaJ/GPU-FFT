@@ -9,6 +9,8 @@
 #include <fstream>
 #include <iostream>
 
+#include <ctime>
+
 #include "cuda_runtime.h"
 #include "cuda.h"
 
@@ -203,6 +205,7 @@ void execute_gpu_fourier_transform(
 
   std::string filename =
     (modeFlag == gpuFFT::GPU_DFT_ONLY ? "gpu_dft_output.dat" : "gpu_idft_output.dat");
+  std::string timeMode;
   
   // Allocate the host data
   float* hostRealData = allocateHostData(dataSize * dataSize);
@@ -237,11 +240,13 @@ void execute_gpu_fourier_transform(
   {
     // Invoke the DFT
     dft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+    timeMode = "DFT";
   }
   else if (modeFlag == gpuFFT::GPU_IDFT_ONLY)
   {
     // Invoke the IDFT
     idft <<< dataSize, dataSize >>> (realResiduals, imagResiduals, deviceRealData, deviceImagData, dataSize);
+    timeMode = "IDFT";
   }
   else
   {
@@ -266,8 +271,6 @@ void execute_gpu_fourier_transform(
   cudaMemcpy(hostRealData, realResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
   cudaMemcpy(hostImagData, imagResiduals, deviceSize * dataSize, cudaMemcpyDeviceToHost);
   
-  // INSTEAD OF USING STL VECTOR, CONSIDER USING THRUST VECTOR AND USING THE
-  // REDUCE OPERTIONS
   std::vector<float> realResult(dataSize);
   std::vector<float> imagResult(dataSize);
 
@@ -289,6 +292,13 @@ void execute_gpu_fourier_transform(
   // Write the results to a file
   gpuFFT::Filewriter gpuFourierWriter(filename);
   gpuFourierWriter.write(realResult, imagResult);
+  
+  // Print the duration to the screen
+  float milliseconds;
+  cudaEventElapsedTime(&milliseconds, fourierTransformStartEvent, fourierTransformEndEvent);
+  float seconds = milliseconds * 1.0e-6;
+  
+  std::cout << "Duration of GPU " << timeMode << ": " << seconds << " seconds" << std::endl;
 
   // Free the device-memory
   freeDeviceMemory(deviceRealData);
@@ -320,25 +330,41 @@ void execute_cpu_fourier_transform(
 	std::vector<float> transformedReal;
 	std::vector<float> transformedImag;
 
+  // Record some string-related information
   std::string filename;
+  std::string timeMode;
+  
+  // Start the CPU timing
+  time_t startTime;
+  time_t endTime;
 
   // Check the operating mode
   if (modeFlag == gpuFFT::CPU_DFT_ONLY)
   {
+    time(&startTime);
+    
 	  // Perform the Discrete Fourier Transform
 	  // (note that the DFT operation does not affect the original input)
 	  cpuFourier.dft(transformedReal, transformedImag);
+    
+    time(&endTime);
 
     filename = "cpu_dft_output.dat";
+    timeMode = "DFT";
   }
 
   else if (modeFlag == gpuFFT::CPU_IDFT_ONLY)
   {
+    time(&startTime);
+    
 	  // Perform the Inverse Discrete Fourier Transform
 	  // (note that the IDFT operation does not affect the original input)
 	  cpuFourier.idft(transformedReal, transformedImag);
+    
+    time(&endTime);
 
     filename = "cpu_idft_output.dat";
+    timeMode = "IDFT";
   }
 
   // If the operating mode is invalid, throw a runtime error
@@ -350,6 +376,10 @@ void execute_cpu_fourier_transform(
 	// Write out the DFT results to a file
 	gpuFFT::Filewriter cpuFourierWriter(filename);
 	cpuFourierWriter.write(transformedReal, transformedImag);
+  
+  float durationSeconds = difftime(endTime, startTime);
+  
+  std::cout << "Duration of CPU " << timeMode << ": " << durationSeconds << " seconds" << std::endl;
 }
 
 // ====================================================

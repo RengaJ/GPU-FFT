@@ -30,23 +30,17 @@ namespace gpuFFT
   void Filereader::readFile(std::vector<float>& reals,
                             std::vector<float>& imags)
   {
-    std::string dataLine;
-    std::getline(_stream, dataLine);
+    reals.clear();
+    imags.clear();
     
-    int numberOfEntries = atoi(dataLine.c_str());
+    float realValue;
+    float imagValue;
     
-    // Ensure the data vector is empty
-    
-    // Populate the data vector
-    std::getline(_stream, dataLine);
-    
-    float real;
-    std::stringstream ss(dataLine);
-    for (int i = 0; i < numberOfEntries; ++i)
+    while (_stream.good())
     {
-      ss >> real;
-      reals.push_back(real);   // Real
-      imags.push_back(0.0f);   // Imaginary
+      _stream >> realValue >> imagValue;
+      reals.push_back(realValue);
+      imags.push_back(imagValue);
     }
   }
 }
