@@ -6,11 +6,11 @@
 
 namespace gpuFFT
 {
+  /// @brief Class that provides file reading capabilities.
   class Filereader
   {
     public:
       Filereader(std::string filename);
-      
       ~Filereader();
       
       bool exists();

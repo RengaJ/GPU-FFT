@@ -9,7 +9,7 @@
 #include <fstream>
 #include <iostream>
 
-#include <ctime>
+#include <time.h>
 
 #include "cuda_runtime.h"
 #include "cuda.h"
@@ -50,15 +50,15 @@
 /// @return A two-element floating-point value containing the real (x) and imaginary (y) parts of the omega value
 __device__ float2 compute_omega(const unsigned int k, const unsigned n, const unsigned N, const int multiplier)
 {
-	float reciprocal = 1.0f / N;
-	int exponent     = multiplier * k * n;
-	float theta      = 2.0f * exponent * CUDART_PI_F * reciprocal;
+  float reciprocal = 1.0f / N;
+  int exponent     = multiplier * k * n;
+  float theta      = 2.0f * exponent * CUDART_PI_F * reciprocal;
 
-	float2 omega;
-	omega.x = cosf(theta);
-	omega.y = sinf(theta);
+  float2 omega;
+  omega.x = cosf(theta);
+  omega.y = sinf(theta);
 
-	return omega;
+  return omega;
 }
 
 /// //////////////////////////////////////////////////// ///
@@ -108,16 +108,16 @@ __global__ void dft(float* realData,  float* imagData,
 /// @param [ in] imagInput  The set of imaginary input data
 /// @param [ in] N          The total number of elements in the input data
 __global__ void idft(float* realData,  float* imagData,
-	                 float* realInput, float* imagInput,
-	                 unsigned int N)
+                   float* realInput, float* imagInput,
+                   unsigned int N)
 {
-	const unsigned int n = blockIdx.x * blockDim.x + threadIdx.x;
-	const unsigned int k = threadIdx.x;
+  const unsigned int n = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned int k = threadIdx.x;
 
-	float2 omega = compute_omega(k, blockIdx.x, N, IDFT_MULTIPLIER);
+  float2 omega = compute_omega(k, blockIdx.x, N, IDFT_MULTIPLIER);
 
-	realData[n] = (realInput[k] * omega.x) - (imagInput[k] * omega.y);
-	imagData[n] = (realInput[k] * omega.y) + (imagInput[k] * omega.x);
+  realData[n] = (realInput[k] * omega.x) - (imagInput[k] * omega.y);
+  imagData[n] = (realInput[k] * omega.y) + (imagInput[k] * omega.x);
 }
 
 /// //////////////////////////////////////////////////// ///
@@ -168,18 +168,28 @@ float* allocateHostData(unsigned int numElements)
   return input;
 }
 
+/// @brief Allocate an array of data on the device-side. This will
+///        also ensure the data is initialized to zero prior to being
+///        used.
+///
+///        *** NOTE *** This array needs to be free with the freeDeviceMemory
+///                     function. It will not be freed automatically.
+///
+/// @ param [inout] input  An unallocated pointer to float* data.
+/// @ param [   in] size   The number of elements being allocated
 void allocateDeviceMemory(float** input, unsigned int size)
 {
   cudaMalloc((void**)input, size);
   cudaMemset(*input, 0, size);
 }
 
+/// @brief Free the device memory
+///
+/// @param [in] input    The input array that was allocated on the device
 void freeDeviceMemory(float* input)
 {
   cudaFree(input);
 }
-
-
 
 /// @brief Free an allocated float array.
 ///
@@ -283,9 +293,9 @@ void execute_gpu_fourier_transform(
     imagResult[i] = 0.0f;
     for (unsigned int j = 0; j < dataSize; ++j)
     {
-		  int index = (i * dataSize) + j;
-		  realResult[i] += hostRealData[index] * reciprocal;
-		  imagResult[i] += hostImagData[index] * reciprocal;
+      int index = (i * dataSize) + j;
+      realResult[i] += hostRealData[index] * reciprocal;
+      imagResult[i] += hostImagData[index] * reciprocal;
     }
   }
   
@@ -296,9 +306,8 @@ void execute_gpu_fourier_transform(
   // Print the duration to the screen
   float milliseconds;
   cudaEventElapsedTime(&milliseconds, fourierTransformStartEvent, fourierTransformEndEvent);
-  float seconds = milliseconds * 1.0e-6;
   
-  std::cout << "Duration of GPU " << timeMode << ": " << seconds << " seconds" << std::endl;
+  std::cout << "Duration of GPU " << timeMode << ": " << milliseconds << " milliseconds" << std::endl;
 
   // Free the device-memory
   freeDeviceMemory(deviceRealData);
@@ -316,38 +325,36 @@ void execute_gpu_fourier_transform(
 ///
 /// @param[in] real    The real parts of the input
 /// @param[in] imag    The imaginary parts of the input
-
-// TODO: ADD OUTPUTS FOR TIMINGS (DFT and IDFT)
 void execute_cpu_fourier_transform(
   std::vector<float>& real,
   std::vector<float>& imag,
   gpuFFT::ModeFlag modeFlag)
 {
-	// Create the CPU-based DFT object
-	gpuFFT::CPUDFT cpuFourier(real, imag);
+  // Create the CPU-based DFT object
+  gpuFFT::CPUDFT cpuFourier(real, imag);
 
-	// Create vectors to contain the transformed data
-	std::vector<float> transformedReal;
-	std::vector<float> transformedImag;
+  // Create vectors to contain the transformed data
+  std::vector<float> transformedReal;
+  std::vector<float> transformedImag;
 
   // Record some string-related information
   std::string filename;
   std::string timeMode;
   
   // Start the CPU timing
-  time_t startTime;
-  time_t endTime;
+  clock_t startTime;
+  clock_t endTime;
 
   // Check the operating mode
   if (modeFlag == gpuFFT::CPU_DFT_ONLY)
   {
-    time(&startTime);
+    startTime = clock();
     
-	  // Perform the Discrete Fourier Transform
-	  // (note that the DFT operation does not affect the original input)
-	  cpuFourier.dft(transformedReal, transformedImag);
+    // Perform the Discrete Fourier Transform
+    // (note that the DFT operation does not affect the original input)
+    cpuFourier.dft(transformedReal, transformedImag);
     
-    time(&endTime);
+    endTime = clock();
 
     filename = "cpu_dft_output.dat";
     timeMode = "DFT";
@@ -355,13 +362,13 @@ void execute_cpu_fourier_transform(
 
   else if (modeFlag == gpuFFT::CPU_IDFT_ONLY)
   {
-    time(&startTime);
+    startTime = clock();
     
-	  // Perform the Inverse Discrete Fourier Transform
-	  // (note that the IDFT operation does not affect the original input)
-	  cpuFourier.idft(transformedReal, transformedImag);
+    // Perform the Inverse Discrete Fourier Transform
+    // (note that the IDFT operation does not affect the original input)
+    cpuFourier.idft(transformedReal, transformedImag);
     
-    time(&endTime);
+    endTime = clock();
 
     filename = "cpu_idft_output.dat";
     timeMode = "IDFT";
@@ -373,13 +380,13 @@ void execute_cpu_fourier_transform(
     throw std::runtime_error("*** CPU FOURIER *** INVALID MODE FLAG");
   }
 
-	// Write out the DFT results to a file
-	gpuFFT::Filewriter cpuFourierWriter(filename);
-	cpuFourierWriter.write(transformedReal, transformedImag);
+  // Write out the DFT results to a file
+  gpuFFT::Filewriter cpuFourierWriter(filename);
+  cpuFourierWriter.write(transformedReal, transformedImag);
   
-  float durationSeconds = difftime(endTime, startTime);
+  clock_t durationMS = (endTime - startTime);
   
-  std::cout << "Duration of CPU " << timeMode << ": " << durationSeconds << " seconds" << std::endl;
+  std::cout << "Duration of CPU " << timeMode << ": " << durationMS << " milliseconds" << std::endl;
 }
 
 // ====================================================

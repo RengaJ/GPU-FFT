@@ -7,15 +7,16 @@
 
 namespace gpuFFT
 {
-	class Filewriter
-	{
-	public:
-		Filewriter(std::string filename);
-		~Filewriter();
+  /// @brief Class that provides file writing capabilities.
+  class Filewriter
+  {
+    public:
+      Filewriter(std::string filename);
+      ~Filewriter();
 
-		void write(std::vector<float>& real, std::vector<float>& imag);
-	private:
-		std::ofstream _outputStream;
-	};
+      void write(std::vector<float>& real, std::vector<float>& imag);
+    private:
+      std::ofstream _outputStream;
+  };
 }
 #endif

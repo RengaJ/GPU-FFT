@@ -5,6 +5,7 @@
 
 namespace gpuFFT
 {
+  /// @brief Class to handle the parsing of input arguments
 	class CommandLineParser
 	{
 		public:
