@@ -33,7 +33,8 @@ namespace gpuFFT
       
       if (i < real.size() - 1)
       {
-        outputStream << " ";
+        _outputStream << " ";
       }
     }
   }
+}

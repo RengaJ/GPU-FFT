@@ -17,8 +17,8 @@
 #define FLOAT_SIZE sizeof(float)
 #define BLOCK_DIM 1024
 
-#define DFT_MULTIPLIER 1
-#define IDFT_MULTIPLIER -1
+#define DFT_MULTIPLIER  -1
+#define IDFT_MULTIPLIER  1
 
 /// //////////////////////////////////////////////////// ///
 /// ---------------   DEVICE FUNCTIONS   --------------- ///
@@ -27,7 +27,7 @@
 /// @brief Compute the omega value used in the Fourier Transforms
 ///
 /// The standard form of the omega value is the following:
-///                    (2*pi / N)
+///                    (2*pi*i / N)
 ///    [omega]    =   e
 ///           n
 ///

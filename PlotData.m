@@ -33,7 +33,9 @@ function PlotData( filename )
 
   TitleString = sprintf('Complex Magnitudes - %s', FileName);
 
-  figure('Name', 'Complex Magnitudes', 'NumberTitle', 'off');
+  figure('Name', 'Complex Magnitudes',...
+         'NumberTitle', 'off',...
+         'WindowStyle', 'Docked');
   plot(Magnitudes, '-b', 'LineWidth', 2);
   grid on;
   grid minor;
